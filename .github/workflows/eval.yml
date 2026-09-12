@@ -1,0 +1,36 @@
+name: Evaluate skills
+
+# Deterministic, dependency-free gate: fails on fact loss, dangling links,
+# orphan references, a failed routing probe, or a budget breach.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Evaluate every skill bundle
+        run: |
+          status=0
+          for script in */scripts/skill-eval.mjs; do
+            skill="$(basename "$(dirname "$(dirname "$script")")")"
+            baseline="eval/$skill/baseline/SKILL.md"
+            echo "::group::evaluate $skill"
+            if [ -f "$baseline" ]; then
+              SKILL_EVAL_BASELINE="$PWD/$baseline" node "$script" || status=1
+            else
+              echo "no baseline at $baseline — running without fact-coverage check"
+              node "$script" || status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $status
