@@ -1,10 +1,25 @@
 ---
 name: modern-cpp
 description: 现代 C++（C++20/23/26）开发技能，采用渐进式披露：本文件是路由层（工具链、构建、报错排查、信任边界、契约 P2900 与 #embed）；细节按需读 references/ 下的 5 个文件——工具链与 CMake 模块、标准库头文件映射、已验证 API 签名、std::meta 反射查询索引、注解读取与序列化 codec。随附可编译 demo 与评估脚本。
-whenToUse: 任何 C++20/23/26 编码或审查任务；写第一行 C++ 代码前加载，尤其是标准库用法（format/expected/span/ranges/print…）、静态反射（P2996）、契约（P2900）、#embed，以及 toolchain/编译参数报错时。
+whenToUse: "任何 C++20/23/26 编码、审查或构建排查任务。按决策类型触发（不看语言版本——低标准代码同样受现代约束）：写/改 P2996 反射、P2900 契约、#embed；使用 C++20+ 库设施（format/expected/span/ranges/print/mdspan/inplace_vector…）；排查构建或工具链报错（meta: No such file or directory、'-freflection' only supported with '-std=c++26'、C++23 静默回落）；设计反射驱动的序列化/codec；要确认头文件归属或精确 API 拼写。"
 ---
 
 # Modern C++ (C++20 → C++26) — skill router
+
+> **Usage contract — read this first.** This skill is **layered**: this file is
+> the router (always what you get on load); the verified detail is in five
+> `references/` files read **on demand, one per task**. Read the single file the
+> routing table selects — do not read them all, and do not conclude a fact is
+> absent until you have searched the whole bundle.
+>
+> **This skill cannot trigger its own loading.** A load is decided before any
+> of this text is read, so nothing here can make an agent load it. Only two
+> layers can: this skill's `whenToUse` (which the session catalog shows to the
+> model) and a workspace `AGENTS.md` or session persona. If you are writing
+> C++20+ code and this skill is *not* loaded, say so and continue from the
+> workspace's own documentation — do not silently assume C++26 facts from
+> memory. Repository conventions in a workspace `AGENTS.md` take precedence
+> over anything here.
 
 本 skill 采用**渐进式披露**：本文件是常读的路由层（工具链、构建、报错排查、
 信任边界）；已实机验证的细节都在 `references/` 下，**按任务读对应的一个文件**，
@@ -18,10 +33,6 @@ the trust boundary below says what that means for re-verification.
 
 Contracts and `#embed` are short enough that keeping them here is cheaper than
 a round trip, so they are inlined below rather than split out.
-
-**Workspace rule:** a workspace `AGENTS.md` records repository-specific
-conventions (paths, build recipes, project idioms) and takes precedence over
-this skill inside that repo.
 
 ## Six rules that prevent wasted work
 

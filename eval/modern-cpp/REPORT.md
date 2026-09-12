@@ -47,8 +47,8 @@ router (finding F6): at 1,095 B the file cost a full tool round trip to read.
 
 | Layer | File | Bytes | Loaded |
 | --- | --- | ---: | --- |
-| L0 catalog | frontmatter of `SKILL.md` | 688 | every session (advertisement) |
-| L1 router | `SKILL.md` | 10,620 | on `skill` load |
+| L0 catalog | frontmatter of `SKILL.md` | 959 | every session (advertisement) |
+| L1 router | `SKILL.md` | 12,599 | on `skill` load |
 | L1 (inlined) | contracts (P2900) + `#embed` (P1967) | ~1,100 of the above | with the router — no round trip |
 | L2 | `references/toolchain.md` | 9,481 | on demand |
 | L2 | `references/stdlib-headers.md` | 7,904 | on demand |
@@ -74,6 +74,9 @@ to justify a round trip.
 | F7 | The report (~10 KB) and the frozen baseline (62.6 KB, **stale content**) sat inside the bundle, where any whole-bundle search can surface them as evidence. | Both moved outside the bundle to `$DSH_HOME/skill-eval/modern-cpp/`; the script reads the baseline from there (`SKILL_EVAL_BASELINE` overrides). |
 | F8 | **Bundle gap**: `define_static_array` was documented only for `template for` plumbing; the "collect the names in a helper and return the vector" shape — which fails two ways on GCC 16.2.0 — was absent. | Found by a probe *not* constrained by the skill (see §6). `references/reflection-meta.md` now documents both failure messages and a verbatim-compiled fix. |
 | F9 | The "do NOT re-verify" rule suppressed *useful* reproduction as well as wasted re-derivation. | Rewritten as **lookup vs derivation**: still no re-deriving settled facts, but an empirical check that answers the agent's own question (reproducing a failure, compiling the construct about to ship) is explicitly sanctioned. |
+| F10 | A *descriptive* pointer to the skill ("generic facts live in the `modern-cpp` skill") produced a 1/3 load rate; the skill cannot trigger its own loading from its body. | Fixed at the layer that can: `whenToUse` retargeted to decision types, the body now states the usage contract and says outright that it cannot self-trigger, and the consuming repo's `AGENTS.md` carries the imperative precondition (measured 3/3). See §6.2. |
+| F11 | **The skill silently vanished from the catalog** mid-session: the rewritten `whenToUse` contained `: `, making a plain YAML scalar parse as a nested mapping, and discovery drops an invalid-frontmatter skill with no model-visible diagnostic. The gate had only regex-validated the frontmatter, which passes malformed YAML. | Gate now **parses** frontmatter (provider's own YAML, strict fallback) and fails on invalid YAML, bad/missing `name`/`description`, non-kebab or directory-mismatched name, legacy keys. Reverting the quote reproduces the provider's exact error. See §6.3. |
+| F12 | Budgets (12,000 B router / 700 B frontmatter) had silently become the binding constraint on load-bearing instructions. | Raised deliberately to 13,312 B / 1,024 B with rationale at the definition: guardrail headroom, not a target; never trim substance to fit a number. See §6.3. |
 
 ## 3. Evaluation results
 
@@ -81,26 +84,26 @@ to justify a round trip.
 
 | Metric | Baseline | Router | Change |
 | --- | ---: | ---: | ---: |
-| Always-loaded L1 bytes | 62,617 | 10,620 | **−83.0 %** |
-| Always-loaded L1 est. tokens | 16,468 | 2,618 | **−84.1 %** |
+| Always-loaded L1 bytes | 62,617 | 12,599 | **−79.9 %** |
+| Always-loaded L1 est. tokens | 16,468 | 3,066 | **−81.4 %** |
 
 Typical per-task route cost (router + the selected reference(s)):
 
 | Route | Files | Bytes | vs baseline |
 | --- | ---: | ---: | ---: |
-| router only (no reference read) | 1 | 10,620 | −83.0 % |
-| build / toolchain | 2 | 20,101 | −67.9 % |
-| header lookup | 2 | 18,524 | −70.4 % |
-| API signature | 2 | 18,407 | −70.6 % |
-| reflection / `std::meta` | 2 | 37,473 | −40.2 % |
-| reflection codec | 3 | 44,272 | −29.3 % |
-| contracts / `#embed` (inlined) | 1 | 10,620 | −83.0 % |
-| *worst case (reads everything)* | 6 | 69,444 | **+10.9 %** |
+| router only (no reference read) | 1 | 12,599 | −79.9 % |
+| build / toolchain | 2 | 22,080 | −64.7 % |
+| header lookup | 2 | 20,503 | −67.3 % |
+| API signature | 2 | 20,386 | −67.4 % |
+| reflection / `std::meta` | 2 | 39,452 | −37.0 % |
+| reflection codec | 3 | 46,251 | −26.1 % |
+| contracts / `#embed` (inlined) | 1 | 12,599 | −79.9 % |
+| *worst case (reads everything)* | 6 | 71,423 | **+14.1 %** |
 
 The worst case is the only regression: an agent that ignores the routing table
 and reads every reference pays ~6.6 KB more than the old monolith (the
 router's duplicated triage table plus the per-file headers). That is the
-intended trade — the worst case is rare, and every realistic route is 29–83 %
+intended trade — the worst case is rare, and every realistic route is 26–80 %
 smaller. The contracts/`#embed` row is the payoff of F6: the same bytes as the
 bare router, because a 1 KB topic is cheaper to carry than to fetch.
 
@@ -178,13 +181,13 @@ now written into the trust boundary.
 
 ## 4. Verdict
 
-- **Progressive disclosure: achieved.** The always-loaded layer shrank 83.0 %
-  by bytes / 84.1 % by estimated tokens; realistic task routes shrank 29–83 %.
+- **Progressive disclosure: achieved.** The always-loaded layer shrank 79.9 %
+  by bytes / 81.4 % by estimated tokens; realistic task routes shrank 26–80 %.
 - **Effectiveness: preserved, with evidence.** 100 % fact-anchor coverage
   against a frozen baseline, 6/6 mechanical routing probes, 3/3 empirical
   agent probes with correct routing and correct answers, 0 dangling links,
   0 orphan references, and a green demo rebuild.
-- **Residual risks.** (i) worst-case full-read is 10.9 % larger than before;
+- **Residual risks.** (i) worst-case full-read is 14.1 % larger than before;
   (ii) `references/reflection-meta.md` is 26.9 KB and is the natural next file
   to split if it grows; (iii) the failure-triage table is deliberately
   duplicated between the router and `references/stdlib-headers.md` — it must
@@ -194,8 +197,11 @@ now written into the trust boundary.
 
 ## 5. Maintenance contract
 
-- Budgets enforced by the script: router ≤ 12,000 B, any reference ≤ 32,768 B,
-  frontmatter ≤ 700 B.
+- Budgets enforced by the script: router ≤ 13,312 B, any reference ≤ 32,768 B,
+  frontmatter ≤ 1,024 B. Each is guardrail headroom above the measured size,
+  not a target: a raise must be justified in the commit, and the fix for an
+  over-budget bundle is a deliberate decision, never trimming a load-bearing
+  instruction to fit a round number.
 - **Inline anything under ~2 KB** into the router instead of splitting it out:
   a reference costs a full tool round trip regardless of size, so a tiny file
   is pure overhead. (This is the F6 fix — `contracts-embed.md` was 1,095 B.)
@@ -255,9 +261,115 @@ route to a private nested type; (T3) triage `meta: No such file or directory`.
    loaded roots (`$DSH_HOME/skills`, `$DSH_HOME/.agent-presets`) so it cannot be
    discovered as a live preset or skill.
 
+### 6.1 Follow-up: does instruction placement change loading? (A/B/C)
+
+Arm A above left one question open: the persona reached 3/3 skill loads, but it
+lived in a preset that cost a 14.5 KB drifting copy. Does the same imperative
+wording work from the *workspace* layer, at zero maintenance cost?
+
+Three arms, same three frozen tasks, same repo, same model — only the
+instruction layer varied:
+
+| Arm | Instruction layer | T1 | T2 | T3 | Load rate |
+| --- | --- | --- | --- | --- | --- |
+| A | baseline `AGENTS.md` — *descriptive* ("generic C++26 facts live in the `modern-cpp` skill") | late, 4th tool | no | no | **1/3** |
+| B | preset persona — imperative, session level | 1st | 1st | 1st | **3/3** |
+| C | `AGENTS.md` — imperative + decision-type trigger | 1st | 1st | 1st | **3/3** |
+
+**Verdict: C = B.** The workspace layer is sufficient; the preset is not needed
+to get loading. Answer quality was 3/3 in every arm — only load *timing* moved,
+which is consistent with §6's premise that disclosure changes cost, not the
+answer ceiling.
+
+**Why Arm A failed.** `AGENTS.md` said *where* the facts are, not that loading
+is a precondition. The model used the repository's own docs instead, which is
+rational when they answer the question directly. Making the load an imperative
+precondition — and keying the trigger to the *kind of decision* rather than the
+language standard, since the branch keeps C++11–C++26 green — is what closed it.
+
+**Closed loop on F8.** Arm C's first task hit the exact `define_static_array`
+trap that the unconstrained Arm A probe had discovered, and which was fixed in
+the previous commit. The fresh agent applied the documented fix and cited
+`references/reflection-meta.md` by line. An unconstrained probe found a gap, the
+gap was fixed, and a later agent's correct answer depended on the fix — the
+methodology paying for itself.
+
+The change lives in the consuming repository (`nlohmann/json`, commit
+`ae6b6028`), not in this bundle: it is repository policy, not a property of the
+skill. Raw results: `abc-experiment-results.md`.
+
 **Limitations.** n=3, tasks authored by the same agent that ran the experiment,
 and the persona-only substitution means the preset's *tool set* (e.g. the
 missing `present`) was verified by row diff rather than behaviourally. This
 does not measure long multi-turn sessions, and it does not generalize to
 repositories without an `AGENTS.md` — that is precisely the case where the
 preset could still pay for itself.
+
+### 6.2 Instruction placement: which layer can actually trigger a load
+
+The A/B/C results above pin down a distinction worth recording, because it is
+easy to get wrong (the first draft of this work put the wording in the wrong
+place):
+
+**A skill cannot trigger its own loading.** A load is decided *before* the body
+is read, so instruction text inside `SKILL.md` is self-defeating as a loading
+trigger — by the time an agent reads it, it has already loaded. Only two layers
+can move the decision:
+
+| Layer | Reaches the model | Can trigger a load | Scope |
+| --- | --- | --- | --- |
+| `description` / `whenToUse` frontmatter | always (session catalog) | **yes** — it is what the model routes on | every session that can see the skill |
+| Workspace `AGENTS.md` / session persona | always (prompt) | **yes** — proven by arms B and C | that repository / that session |
+| `SKILL.md` body | only after loading | **no** | — |
+
+So the two layers carry different jobs, and the bundle needs both:
+
+1. **`whenToUse` (frontmatter)** — the only skill-owned field that influences
+   the decision. Rewritten from a standard-version trigger to a **decision-type**
+   trigger (reflection/contracts/`#embed`, C++20+ library facilities, build
+   errors, signature lookups), matching what the A/B/C data showed actually
+   needed answering.
+2. **The `SKILL.md` body** — states the *usage contract* for when the skill is
+   loaded: read the router, then exactly one routed reference; work out of the
+   bundle rather than re-deriving settled facts; report confirmed contradictions
+   as findings. It also states explicitly that it cannot trigger its own load,
+   so an agent that notices it is unloaded-but-relevant should say so rather
+   than assume the skill is absent by design.
+3. **Workspace `AGENTS.md`** — the imperative precondition, kept (it is what
+   makes arm C reach 3/3). It remains repository policy and lives in the
+   consuming repository, not here.
+
+This is the maintenance rule that falls out: **cross-session reachability is
+frontmatter's job; enforcement is the workspace's job; usage is the body's.**
+
+### 6.3 Two defects the F10 work exposed in the gate itself
+
+Adding the usage contract and retargeting `whenToUse` surfaced two failures that
+the gate had been unable to see:
+
+**A silent-discovery defect (caught, fixed).** The rewritten `whenToUse` value
+contained `: ` sequences (from flag examples like `-std=c++26`), which makes a
+plain YAML scalar parse as a *nested mapping*. The skill provider drops a skill
+whose frontmatter is invalid, **with no model-visible diagnostic** — the skill
+simply vanishes from the session catalog. That is exactly what happened: the
+`modern-cpp` entry disappeared mid-session and came back only when the value was
+quoted. The gate had been validating frontmatter with regexes (`^name:\s*...`,
+`^description:\s*\S`), which match malformed YAML just as happily as valid YAML.
+It now **parses** the frontmatter with the provider's own YAML implementation
+(falling back to a strict inline parser) and fails on: invalid YAML, non-string
+or missing `name`/`description`, a name that is not kebab-case or does not match
+the bundle directory, and unsupported legacy keys. Reverting the quote
+reproduces the failure with the provider's exact message.
+
+This is the highest-severity check in the gate because it is the one failure
+mode with **no** signal: every other defect here surfaces as a wrong answer,
+whereas this one surfaces as the skill not existing.
+
+**Budgets had silently become the binding constraint.** The router grew to
+12,599 B and the frontmatter to 959 B, both over limits that were arbitrary
+round numbers chosen when the bundle was smaller. Trimming load-bearing
+instructions to fit a number chosen for convenience inverts the priority, so the
+budgets were raised deliberately (13,312 B / 1,024 B) with the rationale recorded
+at the definition: they exist to make growth a conscious decision, not to
+constrain content. The L0 budget is still the strictest, because frontmatter
+rides in every session's catalog whether or not the skill is ever loaded.

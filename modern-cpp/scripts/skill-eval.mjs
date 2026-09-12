@@ -14,8 +14,43 @@
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+// Reuse the provider's own YAML implementation when it is installed, so the
+// gate accepts exactly what discovery accepts. Fall back to a strict inline
+// parser (block scalars and quoted/plain scalars) when it is not available.
+const require0 = createRequire(import.meta.url);
+let parseYaml;
+try {
+  ({ parse: parseYaml } = require0('yaml'));
+} catch {
+  parseYaml = (text) => {
+    const out = {};
+    for (const line of text.split('\n')) {
+      if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+      const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+      if (!m) throw new Error(`unsupported frontmatter line: ${line.slice(0, 60)}`);
+      const [, key, rawValue] = m;
+      let value = rawValue.trim();
+      if (value.startsWith('"')) {
+        if (!value.endsWith('"') || value.length < 2)
+          throw new Error(`unterminated quoted value for "${key}"`);
+        value = value.slice(1, -1);
+      } else if (value.startsWith("'")) {
+        if (!value.endsWith("'") || value.length < 2)
+          throw new Error(`unterminated quoted value for "${key}"`);
+        value = value.slice(1, -1);
+      } else if (/:\s/.test(value)) {
+        // a plain scalar containing ": " is the classic invalid-YAML trap
+        throw new Error(`Nested mappings are not allowed in compact mappings (key "${key}")`);
+      }
+      out[key] = value;
+    }
+    return out;
+  };
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -27,10 +62,18 @@ const BASELINE =
 const JSON_OUT = process.argv.includes('--json');
 
 // ── budgets ─────────────────────────────────────────────────────────────────
+// Budgets are guardrails against silent bloat, not targets. Each is set a
+// little above the measured size with headroom, and every raise must be
+// justified in the commit — the point is to make growth a deliberate decision,
+// never to force trimming a load-bearing instruction to fit a round number.
 const BUDGET = {
-  routerBytes: 12000, // L1 always loaded on skill load
-  referenceBytes: 32768, // any single L2 file
-  l0Bytes: 700, // frontmatter advertised in the catalog
+  // L1 is loaded on every `skill` call. Baseline monolith was 62,617 B; this
+  // keeps the always-loaded layer under ~21% of it.
+  routerBytes: 13312,
+  referenceBytes: 32768, // any single L2 file (largest is reflection-meta at ~28 KB)
+  // L0 rides in the session catalog for EVERY session, loaded or not, so it is
+  // the most expensive byte in the bundle. It must stay a routing summary.
+  l0Bytes: 1024,
 };
 
 // ── token estimate ──────────────────────────────────────────────────────────
@@ -51,6 +94,42 @@ const routerText = read(SKILL);
 const fmMatch = routerText.match(/^---\n([\s\S]*?)\n---\n/);
 const frontmatter = fmMatch ? fmMatch[1] : '';
 const routerBody = fmMatch ? routerText.slice(fmMatch[0].length) : routerText;
+
+// Frontmatter must PARSE, not merely match the --- fences. The skill provider
+// drops a skill whose YAML is invalid, and the model catalog then shows no
+// diagnostic at all — the skill just silently disappears. A regex-only check
+// misses that: an unquoted value containing ": " (easy to introduce when the
+// text mentions flags like `-std=c++26: ...`) is invalid YAML while still
+// looking perfectly fine. Parse it with the same YAML implementation the
+// provider uses, so the gate fails exactly when discovery would.
+const fmErrors = [];
+let fmParsed = null;
+if (!fmMatch) {
+  fmErrors.push('no YAML frontmatter block (--- ... ---) at the top of SKILL.md');
+} else {
+  try {
+    fmParsed = parseYaml(frontmatter);
+  } catch (error) {
+    fmErrors.push(`frontmatter is not valid YAML: ${error.message.split('\n')[0]}`);
+  }
+}
+if (fmParsed) {
+  const name = fmParsed.name;
+  if (typeof name !== 'string') fmErrors.push('frontmatter "name" is missing or not a string');
+  else {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name))
+      fmErrors.push(`frontmatter "name" ${JSON.stringify(name)} is not kebab-case`);
+    const dir = basename(ROOT);
+    if (name !== dir)
+      fmErrors.push(`frontmatter "name" (${name}) does not match the bundle directory (${dir})`);
+  }
+  if (typeof fmParsed.description !== 'string' || fmParsed.description.trim() === '')
+    fmErrors.push('frontmatter "description" is missing or empty');
+  if (fmParsed.whenToUse !== undefined && typeof fmParsed.whenToUse !== 'string')
+    fmErrors.push('frontmatter "whenToUse" must be a string');
+  for (const legacy of ['always-apply', 'alwaysApply', 'always_apply'])
+    if (Object.hasOwn(fmParsed, legacy)) fmErrors.push(`frontmatter field "${legacy}" is unsupported`);
+}
 
 const refFiles = existsSync(REF_DIR)
   ? readdirSync(REF_DIR).filter((f) => f.endsWith('.md')).sort()
@@ -197,9 +276,10 @@ const baselineTokens = estTokens(baselineText);
 
 // ── hard checks ─────────────────────────────────────────────────────────────
 const failures = [];
-if (!fmMatch) failures.push('SKILL.md has no YAML frontmatter block');
-if (!/^name:\s*modern-cpp\s*$/m.test(frontmatter)) failures.push('frontmatter name is not modern-cpp');
-if (!/^description:\s*\S/m.test(frontmatter)) failures.push('frontmatter description missing');
+// frontmatter must parse as valid YAML with the required fields — an invalid
+// file is dropped by discovery with no model-visible diagnostic, so the skill
+// silently vanishes from the catalog. This is the highest-severity check.
+failures.push(...fmErrors);
 if (missingAnchors.length) failures.push(`${missingAnchors.length} baseline fact anchor(s) missing from the bundle`);
 if (dangling.length) failures.push(`dangling path reference(s): ${dangling.join(', ')}`);
 if (orphans.length) failures.push(`reference(s) not routed from SKILL.md: ${orphans.join(', ')}`);
