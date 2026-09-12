@@ -9,3 +9,7 @@ build/
 # archived (non-live) preset composition — kept for revival, must never be
 # discovered as a live preset or skill
 !eval/*/preset-archived/
+
+# transient experiment inputs — repo snapshots of consuming projects must not
+# be published here
+eval/**/*.before-experiment
