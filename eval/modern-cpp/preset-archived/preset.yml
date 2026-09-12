@@ -1,0 +1,2 @@
+name: 现代 C++（C++20–26）
+description: 面向现代 C++（C++20/23/26）的完整编码 Agent：内置经实机验证的 C++26 反射/契约/#embed 工具链知识、标准库头文件速查表（设施→头文件）、验证过的 API 签名速查（format/expected/span/ranges/jthread/print/mdspan/饱和运算等）、完整的 std::meta 查询索引、GCC 16 坑位清单、构建配方与"信任边界"（同工具链不重复验证）、离线文档路径与验证工作流；工作区自身的静态反射工程为第一参考，通用 demo 工程（examples/reflection-demo/）随 modern-cpp skill 提供（skill 置于用户全局根 ~/.dsh/skills，所有会话可见）。

@@ -126,6 +126,29 @@
   context (e.g. `constexpr std::size_t n = es.size();` or a `static_assert` on
   it); carry the values out via constexpr locals. `define_static_string`
   pointers are runtime-usable directly.
+  (3) **`define_static_array` demands STRUCTURAL elements, and a
+  `std::vector` returned from a helper is itself the transient-allocation
+  trap** — verified 2026-09 while writing a member-name printer. The tempting
+  shape is a `consteval` helper that collects names and returns the vector:
+  ```cpp
+  std::vector<std::string_view> names_of() { /* ... */ }   // rejected
+  ```
+  It fails two ways depending on where it is demanded — as
+  `<lambda>() is not a constant expression because it refers to a result of
+  'operator new'` (the transient-vector rule, GCC 16.2.0) or, when the vector
+  element is a `std::string_view`/`std::string`, on the elements not being
+  structural (`basic_string_view::_M_len` is not public). **Fix: do not
+  materialize names at all — collect `std::meta::info` (which IS structural)
+  and call `identifier_of(m)` / `display_string_of(type_of(m))` inside the
+  `template for` body:**
+  ```cpp
+  template for (constexpr auto m : std::define_static_array(
+      std::meta::nonstatic_data_members_of(^^Point, std::meta::access_context::unprivileged())))
+    std::println("{}", std::meta::identifier_of(m));
+  ```
+  Reach for `define_static_array` only over a plain structural element type.
+  (Related but distinct: annotation *types* must also be structural AND
+  extractable — see `references/annotations-codec.md`.)
 
 ### Missing / broken in GCC 16 (do not use)
 

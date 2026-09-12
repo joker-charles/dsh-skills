@@ -34,9 +34,14 @@ this skill inside that repo.
    `references/stdlib-headers.md` (facility → header) and
    `references/stdlib-api.md` (exact verified spellings). Headers are not
    transitive; a facility exists only once its own header is included.
-3. **Do not re-verify facts this bundle already settled.** See § Trust
-   boundary. If you doubt the toolchain, run the one-line smoke test — do not
-   grep the compiler's headers or rewrite minimal repros.
+3. **Look facts up instead of re-deriving them.** See § Trust boundary. The
+   bundle's facts are already verified, so do not re-derive them from scratch:
+   no grepping the compiler's headers, no rewriting minimal repros to
+   "confirm" a settled claim. But **do not suppress a cheap empirical check
+   when it is the thing you actually need** — reproducing a failure you are
+   diagnosing, or compiling the specific construct you are about to ship, is
+   evidence, not wasted work, and one compile is usually cheaper than being
+   wrong. The one-line smoke test below is the cheapest such check.
 4. **Reflection-based serialization has a playbook.** Before designing a
    reflection codec, read `references/annotations-codec.md`; for the
    `std::meta` queries it builds on, `references/reflection-meta.md`.
@@ -115,23 +120,32 @@ The same table, with the header map it belongs to, is in
 
 ## Trust boundary — what to re-verify and what not to
 
-- **Do NOT re-verify on the same toolchain.** If `g++-16` is the compiler,
-  trust the header map, the API signatures, and the reflection patterns in
-  `references/`. Re-checking settled facts every session is wasted work. The
-  one-line smoke test above is the cheap confidence check.
+The distinction is **lookup vs derivation**, not verification vs trust.
+
+- **Do not re-derive what the bundle settled.** If `g++-16` is the compiler,
+  the header map, the API signatures and the reflection patterns in
+  `references/` are already verified; re-probing them from scratch (grepping
+  libstdc++ headers, writing fresh minimal repros to "check" a documented
+  fact) is the wasted-work loop this bundle exists to prevent.
+- **Do check what you actually depend on.** A cheap empirical test that
+  answers *your* question is evidence, not duplication: reproducing the error
+  you are diagnosing, or compiling the exact construct you are about to ship.
+  One compile costs seconds; a wrong answer costs a whole round trip. Neither
+  rule below overrides this.
 - **A missing-header / unsupported-flag error is almost always a
   compiler-or-flag problem, not a knowledge gap.** Check `which g++-16` and
   that `-std=c++26 -freflection` are both present before doubting the bundle.
-- **Re-verify only when** (a) the toolchain differs (other machine, other
-  compiler version, clang/MSVC instead of GCC), or (b) a compile error
-  contradicts a claim here — then investigate the code first (usually a
-  missing header, a wrong flag, or your own bug), not the bundle's facts.
+- **Treat a contradicting error as new evidence.** When the toolchain differs
+  (other machine, newer compiler, clang/MSVC instead of GCC) or a real compile
+  error contradicts a claim here, investigate — starting with your own code
+  (usually a missing header, a wrong flag, or a genuine bug), then the
+  specific claim the error touches. A confirmed contradiction is a finding
+  worth reporting, not something to explain away.
 - **Missing API?** Search the bundle first (rule 5). If it is genuinely
-  absent, record the gap and ask the maintainer to add it — do not start
-  re-deriving toolchain behavior in-session.
+  absent, record the gap and report it — that is a bundle defect.
 - Recorded verification toolchain: g++-16 **16.1.0** / libstdc++ 16. A newer
   same-major `g++-16` (e.g. 16.2.0) is the same toolchain family: keep
-  trusting these facts, and only re-verify the specific claim a real error
+  trusting these facts, and re-check only the specific claim a real error
   contradicts.
 
 ## Bundle layout

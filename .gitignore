@@ -5,3 +5,7 @@ build/
 # evaluation leftovers
 /tmp/
 *.tmp
+
+# archived (non-live) preset composition — kept for revival, must never be
+# discovered as a live preset or skill
+!eval/*/preset-archived/

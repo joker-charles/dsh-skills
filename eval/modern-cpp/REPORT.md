@@ -72,6 +72,8 @@ to justify a round trip.
 | F5 | The demo README still pointed at the old "Reflection-driven serialization" section name. | Repointed to `references/annotations-codec.md`. |
 | F6 | Over-fragmentation: `references/contracts-embed.md` was 1,095 B, so reading it cost a full tool round trip. | Merged into the router (still under the 12 KB budget); the probe now asserts the content is inlined. |
 | F7 | The report (~10 KB) and the frozen baseline (62.6 KB, **stale content**) sat inside the bundle, where any whole-bundle search can surface them as evidence. | Both moved outside the bundle to `$DSH_HOME/skill-eval/modern-cpp/`; the script reads the baseline from there (`SKILL_EVAL_BASELINE` overrides). |
+| F8 | **Bundle gap**: `define_static_array` was documented only for `template for` plumbing; the "collect the names in a helper and return the vector" shape — which fails two ways on GCC 16.2.0 — was absent. | Found by a probe *not* constrained by the skill (see §6). `references/reflection-meta.md` now documents both failure messages and a verbatim-compiled fix. |
+| F9 | The "do NOT re-verify" rule suppressed *useful* reproduction as well as wasted re-derivation. | Rewritten as **lookup vs derivation**: still no re-deriving settled facts, but an empirical check that answers the agent's own question (reproducing a failure, compiling the construct about to ship) is explicitly sanctioned. |
 
 ## 3. Evaluation results
 
@@ -207,3 +209,55 @@ now written into the trust boundary.
 - **Keep non-instructional material out of the bundle.** The report and the
   baseline are measurement artifacts; anything inside the bundle is part of the
   model's retrieval surface, so meta-material belongs outside (finding F7).
+
+---
+
+## 6. Preset A/B experiment (2026-09-12)
+
+**Question.** The `modern-cpp` agent preset carried a 1.5 KB persona on top of a
+14.5 KB copy of the shipped `standard` composition. Does the preset earn that
+copy? Specifically: does the persona change what the agent *does*?
+
+**Method.** Fixed workspace (`nlohmann/json` @ `feature/static-reflection`),
+three frozen tasks, same model, same tools. The only variable was the persona
+text (a subagent cannot mount a whole preset, so Arm B received the persona
+verbatim in-prompt; the preset's other rows were compared separately by row
+diff). Tasks: (T1) write a P2996 member-name printer; (T2) state the verified
+route to a private nested type; (T3) triage `meta: No such file or directory`.
+
+**Result.**
+
+| Metric | Arm A — no persona | Arm B — persona |
+| --- | --- | --- |
+| Skill loaded | **1/3** (and 4th tool, as a catch-up) | **3/3** (always the first tool) |
+| Answers correct | 3/3 | 3/3 |
+| Grounded in | the repo's own docs (`VERIFIED_FACTS.md`, `BUILD_RECIPES.md`, `reflection_json.hpp`) | the same repo docs, plus the skill |
+
+**Conclusions.**
+
+1. **The persona did not improve answer quality** — both arms answered all three
+   correctly, because the repository's `AGENTS.md` already points at
+   `VERIFIED_FACTS.md`. With information held equal, the preset changes *when*
+   the skill is loaded, not *what* the agent knows.
+2. **The preset is a full replacement, not an overlay**, so keeping it means
+   maintaining the whole row set — and it had already drifted silently:
+   `present` and `command-goal` were missing and `tool-web` had `fetch: false`
+   (none of which were intentional). Drift is structural: it is a hand copy of
+   `standard` and will be stale again after any upgrade.
+3. **The persona's constraints have a real cost.** Arm A's unconstrained agents
+   reproduced the compile error they were diagnosing and compiled both halves of
+   the splice claim; Arm B, told not to re-verify, produced less independent
+   evidence. Arm A also hit — and reported — a genuine bundle gap (F8).
+4. **Decision: the preset was deleted.** Valued at one behaviour (skill-load
+   timing) whose benefit only materializes in repositories *without* an
+   `AGENTS.md` that already routes to the facts. The composition is preserved at
+   `eval/modern-cpp/preset-archived/` for revival, deliberately outside both
+   loaded roots (`$DSH_HOME/skills`, `$DSH_HOME/.agent-presets`) so it cannot be
+   discovered as a live preset or skill.
+
+**Limitations.** n=3, tasks authored by the same agent that ran the experiment,
+and the persona-only substitution means the preset's *tool set* (e.g. the
+missing `present`) was verified by row diff rather than behaviourally. This
+does not measure long multi-turn sessions, and it does not generalize to
+repositories without an `AGENTS.md` — that is precisely the case where the
+preset could still pay for itself.
