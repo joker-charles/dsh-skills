@@ -77,6 +77,7 @@ to justify a round trip.
 | F10 | A *descriptive* pointer to the skill ("generic facts live in the `modern-cpp` skill") produced a 1/3 load rate; the skill cannot trigger its own loading from its body. | Fixed at the layer that can: `whenToUse` retargeted to decision types, the body now states the usage contract and says outright that it cannot self-trigger, and the consuming repo's `AGENTS.md` carries the imperative precondition (measured 3/3). See §6.2. |
 | F11 | **The skill silently vanished from the catalog** mid-session: the rewritten `whenToUse` contained `: `, making a plain YAML scalar parse as a nested mapping, and discovery drops an invalid-frontmatter skill with no model-visible diagnostic. The gate had only regex-validated the frontmatter, which passes malformed YAML. | Gate now **parses** frontmatter (provider's own YAML, strict fallback) and fails on invalid YAML, bad/missing `name`/`description`, non-kebab or directory-mismatched name, legacy keys. Reverting the quote reproduces the provider's exact error. See §6.3. |
 | F12 | Budgets (12,000 B router / 700 B frontmatter) had silently become the binding constraint on load-bearing instructions. | Raised deliberately to 13,312 B / 1,024 B with rationale at the definition: guardrail headroom, not a target; never trim substance to fit a number. See §6.3. |
+| F13 | The rewritten `whenToUse` was never tested without a workspace instruction backing it — the assumption was that repositories without an `AGENTS.md` still needed the (deleted) preset to get a load. | Arm E (§6.4): 3/3 loads from frontmatter alone in a repository with no `AGENTS.md`. The preset's last justification is gone; `whenToUse` travels with the skill, `AGENTS.md` enforces locally. |
 
 ## 3. Evaluation results
 
@@ -275,6 +276,12 @@ instruction layer varied:
 | A | baseline `AGENTS.md` — *descriptive* ("generic C++26 facts live in the `modern-cpp` skill") | late, 4th tool | no | no | **1/3** |
 | B | preset persona — imperative, session level | 1st | 1st | 1st | **3/3** |
 | C | `AGENTS.md` — imperative + decision-type trigger | 1st | 1st | 1st | **3/3** |
+| D | worktree isolation | — | — | — | **discarded** (method invalid — see §6.4) |
+| E | **`whenToUse` frontmatter only** — no `AGENTS.md`, no preset | 1st | 1st | 1st | **3/3** |
+
+The pass condition for every arm was identical: 3/3 correct answers (which all
+arms achieved) **and** a load, which only B, C and E achieved. The published
+`modern-cpp` skill relies on E for reach and C for enforcement.
 
 **Verdict: C = B.** The workspace layer is sufficient; the preset is not needed
 to get loading. Answer quality was 3/3 in every arm — only load *timing* moved,
@@ -301,9 +308,9 @@ skill. Raw results: `abc-experiment-results.md`.
 **Limitations.** n=3, tasks authored by the same agent that ran the experiment,
 and the persona-only substitution means the preset's *tool set* (e.g. the
 missing `present`) was verified by row diff rather than behaviourally. This
-does not measure long multi-turn sessions, and it does not generalize to
-repositories without an `AGENTS.md` — that is precisely the case where the
-preset could still pay for itself.
+does not measure long multi-turn sessions. (The open question it left — whether
+these results generalize to a repository with *no* `AGENTS.md`, the one case
+where the preset could still have paid for itself — is settled in §6.4.)
 
 ### 6.2 Instruction placement: which layer can actually trigger a load
 
@@ -373,3 +380,73 @@ budgets were raised deliberately (13,312 B / 1,024 B) with the rationale recorde
 at the definition: they exist to make growth a conscious decision, not to
 constrain content. The L0 budget is still the strictest, because frontmatter
 rides in every session's catalog whether or not the skill is ever loaded.
+
+### 6.4 Arm E: frontmatter alone, in a repository with no `AGENTS.md`
+
+§6.2 concluded that a skill cannot trigger its own loading from its body, and
+that `whenToUse` is the only skill-owned field that can. Arm E tests whether the
+rewritten `whenToUse` (decision-type trigger) actually does so **with no
+workspace instruction backing it at all**.
+
+**Method — and a method failure worth recording first.** The first attempt
+isolated the environment with a `git worktree` at a clean path and told the
+subagents to work there. That was invalid: a subagent's working directory is
+fixed by the session, not by the prompt, and two of the three ran in the
+original checkout instead — reading its `AGENTS.md` and `docs/static-reflection/`
+while reporting the clean path. One even cited `AGENTS.md §1` in its reasoning
+and still reported the isolated path as its cwd. **A self-reported cwd is not
+evidence.** That arm's data was discarded in full.
+
+The valid method switches the *session workspace itself* to the branch without
+`AGENTS.md`, so subagents inherit the same directory and the same on-disk state —
+there is nothing to misreport. The harness then confirms the condition
+independently, unprompted by anything written here:
+
+```
+Instructions removed: AGENTS.md
+```
+
+Conditions, verified on disk before the arm ran: branch `develop` (`cdf52ae9`);
+`AGENTS.md` absent; `docs/static-reflection/` absent; `.dsh/` project skill root
+absent; no preset. The only remaining trigger is the `description`/`whenToUse`
+pair in the session catalog.
+
+| Task | Loaded | First tool | Answer |
+| --- | --- | --- | --- |
+| E1 — write a P2996 member-name printer | yes | `skill` | compiles, prints `x y z` |
+| E2 — reach a private nested type via `std::meta` | yes | `skill` | correct, with compiled positive **and** negative controls |
+| E3 — triage `meta: No such file or directory` | yes | `skill` | correct (`/usr/include/c++/15/meta` absent, `16/meta` present) |
+
+**Load rate: 3/3, from frontmatter alone.** All three reported
+`PWD_EVIDENCE: /home/joker/apps/json`, and the answers were re-verified
+independently after the fact: E1 recompiled and printed the expected members;
+E2's positive probe ran (`reached private nested type ... x=42 y=3.5`) and its
+negative control failed with the exact expected access error.
+
+**Consequences for the earlier conclusions.**
+
+1. **The preset's last remaining justification is gone.** §6 reasoned that the
+   deleted preset might still earn its keep in repositories *without* an
+   `AGENTS.md`, since it was the only thing that reliably produced a load. Arm E
+   shows the rewritten frontmatter alone reaches 3/3 there — so the preset was
+   paying 14.5 KB of drift risk for a behaviour the skill now provides itself,
+   for free, everywhere it is visible.
+2. **`whenToUse` and `AGENTS.md` are complementary, not redundant.**
+   `whenToUse` travels with the skill and covers every repository; the workspace
+   `AGENTS.md` covers one repository and can say something the skill cannot say
+   about itself — that writing code *before* loading is not permitted. Arm C
+   measured the latter at 3/3; Arm A measured the descriptive alternative at
+   1/3.
+3. **The two defects in §6.3 were what made this possible.** The frontmatter
+   rewrite both introduced the silent-discovery bug (F11) and produced the
+   trigger that now works standalone — the gate that parses frontmatter is what
+   lets this layer be trusted at all.
+
+**Limitations.** n=3, and all three tasks are squarely inside the trigger list —
+this measures whether the written triggers fire, not whether they are the right
+list. Deliberately out of scope: whether an *ambiguous* task (a build tweak, a
+CMake question) should trigger a load. Not triggering there is intended
+behaviour, so a negative sample would test the intended design rather than a
+defect. `whenToUse` is nonetheless a heuristic: it cannot be exhaustive, and the
+cost of a miss is the agent falling back to whatever the repository itself
+documents.
